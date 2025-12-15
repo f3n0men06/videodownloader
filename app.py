@@ -1,9 +1,7 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import yt_dlp
 import os
-import tempfile
-from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -25,28 +23,49 @@ def get_info():
         if not url:
             return jsonify({'success': False, 'error': 'URL gerekli'}), 400
         
+        # YouTube için özel ayarlar
         ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
             'extract_flat': False,
-            'format': 'best',
+            'format': 'best[ext=mp4]/best',
+            'noplaylist': True,
+            # Cookie ve user-agent ekle
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            print(f"Extracting info from: {url}")
             info = ydl.extract_info(url, download=False)
+            print(f"Got info: {info.get('title', 'Unknown')}")
             
-            # En basit yaklaşım - direkt URL
-            video_url = info.get('url')
+            # Video URL'sini al
+            video_url = None
             
-            if not video_url:
-                # Formatları kontrol et
+            # Önce direkt URL'yi kontrol et
+            if info.get('url'):
+                video_url = info['url']
+            else:
+                # Format listesinden en iyisini bul
                 formats = info.get('formats', [])
-                if formats:
-                    # En iyi formatı bul
-                    for f in reversed(formats):
+                # Video+audio içeren formatları önceliklendir
+                for f in formats:
+                    if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
                         if f.get('url'):
                             video_url = f['url']
                             break
+                
+                # Bulamazsa sadece video formatını al
+                if not video_url:
+                    for f in formats:
+                        if f.get('vcodec') != 'none' and f.get('url'):
+                            video_url = f['url']
+                            break
+            
+            if not video_url:
+                raise Exception("Video URL bulunamadı")
             
             return jsonify({
                 'success': True,
@@ -58,7 +77,9 @@ def get_info():
             })
             
     except Exception as e:
-        print(f"Error: {str(e)}")  # Log için
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
